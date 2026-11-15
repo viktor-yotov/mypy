@@ -245,10 +245,13 @@ class ProtocolUseFinder(TraverserVisitor):
         super().visit_call_expr(o)
 
 
-def protocol_name(method_name: str) -> str:
-    """Pick a readable name from the method: write -> Writer, read -> Reader."""
-    name = method_name.strip("_") or "call"
-    return name[0].upper() + name[1:] + ("r" if name.endswith("e") else "er")
+def protocol_name(param_name: str, method_names: list[str]) -> str:
+    """Pick a readable name: write -> Writer, several methods -> <Param>Like."""
+    if len(method_names) == 1:
+        name = method_names[0].strip("_")
+        if name:
+            return name[0].upper() + name[1:] + ("r" if name.endswith("e") else "er")
+    return "".join(part.capitalize() for part in param_name.split("_")) + "Like"
 
 
 class SuggestionFailure(Exception):
@@ -591,21 +594,18 @@ class SuggestionEngine:
             methods = finder.methods.get(arg.variable)
             if not methods:
                 continue  # parameter isn't used through method calls
-            if len(methods) > 1:
-                continue  # several different methods: not supported yet
 
-            ((method, calls),) = methods.items()
-            name = protocol_name(method)
-            # For now, use the argument types from the first call only.
-            arg_types = calls[0]
-            params = "".join(
-                f", arg{pos}: {self.format_type(mod, typ)}" for pos, typ in enumerate(arg_types)
-            )
-            sep = ", /" if arg_types else ""
-            lines = [
-                f"class {name}(Protocol):",
-                f"    def {method}(self{params}{sep}) -> object: ...",
-            ]
+            name = protocol_name(arg.variable.name, list(methods))
+            lines = [f"class {name}(Protocol):"]
+            for method, calls in methods.items():
+                # For now, use the argument types from the first call only.
+                arg_types = calls[0]
+                params = "".join(
+                    f", arg{pos}: {self.format_type(mod, typ)}"
+                    for pos, typ in enumerate(arg_types)
+                )
+                sep = ", /" if arg_types else ""
+                lines.append(f"    def {method}(self{params}{sep}) -> object: ...")
 
             self.protocol_decls.append("\n".join(lines))
             sig["arg_types"][i] = name

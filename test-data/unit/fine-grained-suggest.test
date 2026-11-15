@@ -1307,3 +1307,20 @@ def main() -> None:
 [out]
 (foo.File, str) -> None
 ==
+
+[case testSuggestProtocolSeveralMethods]
+# suggest: --protocols foo.copy
+[file foo.py]
+def copy(source_file, n: int):
+    source_file.seek(n)
+    source_file.close()
+[builtins fixtures/isinstancelist.pyi]
+[out]
+from typing import Protocol
+
+class SourceFileLike(Protocol):
+    def seek(self, arg0: int, /) -> object: ...
+    def close(self) -> object: ...
+
+(SourceFileLike, int) -> None
+==

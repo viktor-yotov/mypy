@@ -62,3 +62,6 @@ test_capi
 /mypyc/lib-rt/*.so
 patch1-Add-protocols-option-to-dmypy-suggest-no-effect-yet.patch
 patch2.diff
+patch3.diff
+patch4.diff
+protocol-suggestions-full.patch

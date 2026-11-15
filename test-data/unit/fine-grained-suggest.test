@@ -1268,3 +1268,88 @@ optional5(None)
 [out]
 (int | None) -> None
 ==
+
+[case testSuggestProtocolOffByDefault]
+# suggest: foo.send_message
+[file foo.py]
+def send_message(destination, message: str):
+    destination.write(message)
+[builtins fixtures/isinstancelist.pyi]
+[out]
+(Any, str) -> None
+==
+
+[case testSuggestProtocolSimpleMethod]
+# suggest: --protocols foo.send_message
+[file foo.py]
+def send_message(destination, message: str):
+    destination.write(message)
+[builtins fixtures/isinstancelist.pyi]
+[out]
+from typing import Protocol
+
+class Writer(Protocol):
+    def write(self, arg0: str, /) -> object: ...
+
+(Writer, str) -> None
+==
+
+[case testSuggestProtocolNotNeededWhenCallsitesKnown]
+# suggest: --protocols foo.send_message
+[file foo.py]
+class File:
+    def write(self, s: str) -> None: ...
+def send_message(destination, message: str):
+    destination.write(message)
+def main() -> None:
+    send_message(File(), "hi")
+[builtins fixtures/isinstancelist.pyi]
+[out]
+(foo.File, str) -> None
+==
+
+[case testSuggestProtocolSeveralMethods]
+# suggest: --protocols foo.copy
+[file foo.py]
+def copy(source_file, n: int):
+    source_file.seek(n)
+    source_file.close()
+[builtins fixtures/isinstancelist.pyi]
+[out]
+from typing import Protocol
+
+class SourceFileLike(Protocol):
+    def seek(self, arg0: int, /) -> object: ...
+    def close(self) -> object: ...
+
+(SourceFileLike, int) -> None
+==
+
+[case testSuggestProtocolSeveralCalls]
+# suggest: --protocols foo.copy
+[file foo.py]
+def copy(source_file, n: int, label: str):
+    source_file.seek(n)
+    source_file.close()
+    source_file.seek(label)
+[builtins fixtures/isinstancelist.pyi]
+[out]
+from typing import Protocol
+
+class SourceFileLike(Protocol):
+    def seek(self, arg0: int | str, /) -> object: ...
+    def close(self) -> object: ...
+
+(SourceFileLike, int, str) -> None
+==
+
+[case testSuggestProtocolDifferentArgCounts]
+# suggest: --protocols foo.f
+[file foo.py]
+def f(x, n: int):
+    x.seek(n)
+    x.seek(n, n)
+[builtins fixtures/isinstancelist.pyi]
+[out]
+(Any, int) -> None
+==

@@ -311,6 +311,7 @@ class FineGrainedSuite(DataSuite):
             callsites = "--callsites" in flags
             no_any = "--no-any" in flags
             no_errors = "--no-errors" in flags
+            protocols = "--protocols" in flags
             m = re.match("--flex-any=([0-9.]+)", flags)
             flex_any = float(m.group(1)) if m else None
             m = re.match(r"--use-fixme=(\w+)", flags)
@@ -326,6 +327,7 @@ class FineGrainedSuite(DataSuite):
                 use_fixme=use_fixme,
                 callsites=callsites,
                 max_guesses=max_guesses,
+                protocols=protocols,
             )
             val = res["error"] if "error" in res else res["out"] + res["err"]
             if json:

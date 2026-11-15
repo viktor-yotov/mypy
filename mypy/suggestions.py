@@ -39,6 +39,7 @@ from mypy.join import join_type_list
 from mypy.meet import meet_type_list
 from mypy.modulefinder import PYTHON_EXTENSIONS
 from mypy.nodes import (
+    ARG_POS,
     ARG_STAR,
     ARG_STAR2,
     ArgKind,
@@ -46,7 +47,9 @@ from mypy.nodes import (
     Decorator,
     Expression,
     FuncDef,
+    MemberExpr,
     MypyFile,
+    NameExpr,
     RefExpr,
     ReturnStmt,
     SymbolNode,
@@ -211,6 +214,46 @@ def get_arg_uses(typemap: dict[Expression, Type], func: FuncDef) -> list[list[Ty
     return [finder.arg_types[arg.variable] for arg in func.arguments]
 
 
+class ProtocolUseFinder(TraverserVisitor):
+    """Find the methods called on each parameter, and the argument types passed to them.
+
+    For example, in
+
+      def send_message(destination, message: str):
+          destination.write(message)
+
+    it records that write() is called on destination with a single str argument.
+    """
+
+    def __init__(self, func: FuncDef, typemap: dict[Expression, Type]) -> None:
+        self.typemap = typemap
+        self.params = {arg.variable for arg in func.arguments}
+        # parameter -> method name -> one list of argument types per call
+        self.methods: dict[SymbolNode, dict[str, list[list[Type]]]] = {}
+
+    def visit_call_expr(self, o: CallExpr) -> None:
+        callee = o.callee
+        if (
+            isinstance(callee, MemberExpr)
+            and isinstance(callee.expr, NameExpr)
+            and callee.expr.node in self.params
+            and all(kind == ARG_POS for kind in o.arg_kinds)
+        ):
+            arg_types = [self.typemap.get(arg, AnyType(TypeOfAny.special_form)) for arg in o.args]
+            calls = self.methods.setdefault(callee.expr.node, {})
+            calls.setdefault(callee.name, []).append(arg_types)
+        super().visit_call_expr(o)
+
+
+def protocol_name(param_name: str, method_names: list[str]) -> str:
+    """Pick a readable name: write -> Writer, several methods -> <Param>Like."""
+    if len(method_names) == 1:
+        name = method_names[0].strip("_")
+        if name:
+            return name[0].upper() + name[1:] + ("r" if name.endswith("e") else "er")
+    return "".join(part.capitalize() for part in param_name.split("_")) + "Like"
+
+
 class SuggestionFailure(Exception):
     pass
 
@@ -255,6 +298,7 @@ class SuggestionEngine:
         flex_any: float | None = None,
         use_fixme: str | None = None,
         max_guesses: int | None = None,
+        protocols: bool = False,
     ) -> None:
         self.fgmanager = fgmanager
         self.manager = fgmanager.manager
@@ -270,6 +314,9 @@ class SuggestionEngine:
 
         self.max_guesses = max_guesses or 64
         self.use_fixme = use_fixme
+        self.protocols = protocols
+        # Protocol class definitions needed by the last suggestion
+        self.protocol_decls: list[str] = []
 
     def suggest(self, function: str) -> str:
         """Suggest an inferred type for function."""
@@ -281,8 +328,11 @@ class SuggestionEngine:
 
         if self.give_json:
             return self.json_suggestion(mod, func_name, node, suggestion)
-        else:
-            return self.format_signature(suggestion)
+        signature = self.format_signature(suggestion)
+        if self.protocol_decls:
+            header = "from typing import Protocol\n\n" + "\n\n".join(self.protocol_decls)
+            return header + "\n\n" + signature
+        return signature
 
     def suggest_callsites(self, function: str) -> str:
         """Find a list of call sites of function."""
@@ -517,7 +567,53 @@ class SuggestionEngine:
         if self.no_errors and errors:
             raise SuggestionFailure("No annotation without errors")
 
-        return self.pyannotate_signature(mod, is_method, best)
+        sig = self.pyannotate_signature(mod, is_method, best)
+        if self.protocols:
+            self.add_protocols(mod, node, best, is_method, sig)
+        return sig
+
+    def add_protocols(
+        self,
+        mod: str,
+        node: FuncDef,
+        best: CallableType,
+        is_method: bool,
+        sig: PyAnnotateSignature,
+    ) -> None:
+        """Replace Any parameter types with Protocols based on how the parameters are used."""
+        # Re-check the function with the chosen signature so that the type map
+        # describes this version of the function.
+        self.try_type(node, best)
+        finder = ProtocolUseFinder(node, self.manager.all_types)
+        node.body.accept(finder)
+
+        start = int(is_method)
+        for i, arg in enumerate(node.arguments[start:]):
+            if not isinstance(get_proper_type(best.arg_types[start + i]), AnyType):
+                continue  # mypy already found a better type
+            methods = finder.methods.get(arg.variable)
+            if not methods:
+                continue  # parameter isn't used through method calls
+
+            name = protocol_name(arg.variable.name, list(methods))
+            lines = [f"class {name}(Protocol):"]
+            for method, calls in methods.items():
+                # Each parameter must accept every type that was passed to it.
+                arity = len(calls[0])
+                if any(len(c) != arity for c in calls):
+                    lines = []
+                    break
+                params = ""
+                for pos in range(arity):
+                    typ = make_simplified_union([c[pos] for c in calls])
+                    params += f", arg{pos}: {self.format_type(mod, typ)}"
+                sep = ", /" if arity else ""
+                lines.append(f"    def {method}(self{params}{sep}) -> object: ...")
+            if not lines:
+                continue  # called with different numbers of arguments; skip for now
+
+            self.protocol_decls.append("\n".join(lines))
+            sig["arg_types"][i] = name
 
     def format_args(
         self,

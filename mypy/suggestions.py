@@ -598,14 +598,19 @@ class SuggestionEngine:
             name = protocol_name(arg.variable.name, list(methods))
             lines = [f"class {name}(Protocol):"]
             for method, calls in methods.items():
-                # For now, use the argument types from the first call only.
-                arg_types = calls[0]
-                params = "".join(
-                    f", arg{pos}: {self.format_type(mod, typ)}"
-                    for pos, typ in enumerate(arg_types)
-                )
-                sep = ", /" if arg_types else ""
+                # Each parameter must accept every type that was passed to it.
+                arity = len(calls[0])
+                if any(len(c) != arity for c in calls):
+                    lines = []
+                    break
+                params = ""
+                for pos in range(arity):
+                    typ = make_simplified_union([c[pos] for c in calls])
+                    params += f", arg{pos}: {self.format_type(mod, typ)}"
+                sep = ", /" if arity else ""
                 lines.append(f"    def {method}(self{params}{sep}) -> object: ...")
+            if not lines:
+                continue  # called with different numbers of arguments; skip for now
 
             self.protocol_decls.append("\n".join(lines))
             sig["arg_types"][i] = name

@@ -1324,3 +1324,32 @@ class SourceFileLike(Protocol):
 
 (SourceFileLike, int) -> None
 ==
+
+[case testSuggestProtocolSeveralCalls]
+# suggest: --protocols foo.copy
+[file foo.py]
+def copy(source_file, n: int, label: str):
+    source_file.seek(n)
+    source_file.close()
+    source_file.seek(label)
+[builtins fixtures/isinstancelist.pyi]
+[out]
+from typing import Protocol
+
+class SourceFileLike(Protocol):
+    def seek(self, arg0: int | str, /) -> object: ...
+    def close(self) -> object: ...
+
+(SourceFileLike, int, str) -> None
+==
+
+[case testSuggestProtocolDifferentArgCounts]
+# suggest: --protocols foo.f
+[file foo.py]
+def f(x, n: int):
+    x.seek(n)
+    x.seek(n, n)
+[builtins fixtures/isinstancelist.pyi]
+[out]
+(Any, int) -> None
+==

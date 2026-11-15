@@ -168,6 +168,11 @@ p.add_argument(
     "--callsites", action="store_true", help="Find callsites instead of suggesting a type"
 )
 p.add_argument(
+    "--protocols",
+    action="store_true",
+    help="Suggest Protocol types for parameters based on how they are used",
+)
+p.add_argument(
     "--use-fixme",
     metavar="NAME",
     type=str,
@@ -520,6 +525,7 @@ def do_suggest(args: argparse.Namespace) -> None:
         flex_any=args.flex_any,
         use_fixme=args.use_fixme,
         max_guesses=args.max_guesses,
+        protocols=args.protocols,
     )
     check_output(response, verbose=False, junit_xml=None, perf_stats_file=None)
 
